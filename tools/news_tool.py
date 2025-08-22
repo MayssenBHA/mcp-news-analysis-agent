@@ -19,6 +19,14 @@ class NewsTool:
             'x-rapidapi-host': config.rapidapi_host,
             'x-rapidapi-key': config.rapidapi_key
         }
+        
+        # Country code mappings for better UX
+        self.country_mappings = {
+            'UK': 'GB',  # United Kingdom -> Great Britain
+            'USA': 'US', # United States of America -> US
+            'ENGLAND': 'GB',
+            'BRITAIN': 'GB'
+        }
     
     async def fetch_news(
         self, 
@@ -32,7 +40,7 @@ class NewsTool:
         
         Args:
             topic: News topic to search for
-            country: Country code (e.g., 'US', 'UK', 'FR')
+            country: Country code (e.g., 'US', 'GB', 'FR') - UK will be converted to GB
             language: Language code (e.g., 'en', 'fr', 'es')
             limit: Maximum number of articles to return
             
@@ -40,6 +48,9 @@ class NewsTool:
             Dictionary containing news articles and metadata
         """
         try:
+            # Convert common country names to proper codes
+            country = self.country_mappings.get(country.upper(), country)
+            
             async with httpx.AsyncClient() as client:
                 # Build the API endpoint URL
                 if topic:
@@ -73,6 +84,20 @@ class NewsTool:
                         'total_results': len(data.get('data', [])),
                         'query': topic or 'top headlines',
                         'timestamp': datetime.now().isoformat()
+                    }
+                elif response.status_code == 429:
+                    return {
+                        'success': False,
+                        'error': "Rate limit exceeded. Please wait before making more requests.",
+                        'message': response.text
+                    }
+                elif response.status_code == 400:
+                    error_data = response.json() if response.text else {}
+                    error_msg = error_data.get('error', {}).get('message', 'Bad request')
+                    return {
+                        'success': False,
+                        'error': f"API error: {error_msg}",
+                        'message': response.text
                     }
                 else:
                     return {
