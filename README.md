@@ -17,7 +17,7 @@ MCPDemo/
 ├── server/
 │   └── mcp_server.py          # MCP server implementation
 ├── client/
-│   └── mcp_agent.py           # Intelligent news analysis agent
+│   └── mcp_client.py           # Intelligent news analysis agent
 ├── tools/
 │   ├── news_tool.py           # News fetching from RapidAPI
 │   ├── sentiment_tool.py      # Sentiment analysis tools
@@ -58,7 +58,7 @@ Edit the `config/.env` file and add your API keys:
 
 ```env
 # News API key from RapidAPI (already provided)
-RAPIDAPI_KEY=6d35e9aa82msh4c8550ffb3e08b4p15bf78jsna3f5a47eeb4d
+RAPIDAPI_KEY=your_rapidapi_api_key_here
 RAPIDAPI_HOST=real-time-news-data.p.rapidapi.com
 
 # Get your Mistral AI API key from https://console.mistral.ai/
