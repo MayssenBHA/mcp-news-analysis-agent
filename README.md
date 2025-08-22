@@ -100,7 +100,7 @@ In a separate terminal:
 .\.venv\Scripts\Activate
 
 # Run the agent
-python client/mcp_agent.py
+python client/mcp_client.py
 ```
 
 ### Example Queries
