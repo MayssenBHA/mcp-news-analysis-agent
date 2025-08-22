@@ -50,6 +50,7 @@ class QueryIntent(BaseModel):
     intent: str = Field(description="Primary intent: fetch_news, sentiment_analysis, summarize, combined_analysis")
     confidence: float = Field(description="Confidence score between 0 and 1")
     topic: Optional[str] = Field(description="News topic if specified")
+    text: Optional[str] = Field(description="Specific text to analyze (if provided in quotes)")
     country: Optional[str] = Field(description="Country code if specified (US, UK, FR, etc.)")
     language: Optional[str] = Field(description="Language code if specified (en, fr, es, etc.)")
     limit: Optional[int] = Field(description="Number of articles requested")
@@ -132,17 +133,21 @@ You are an expert news analysis assistant. Analyze user queries and classify the
 
 Available intents:
 1. fetch_news - User wants to get news articles
-2. sentiment_analysis - User wants sentiment analysis of news or text  
+2. sentiment_analysis - User wants sentiment analysis of news or specific text
 3. summarize - User wants summaries of news or text
 4. combined_analysis - User wants comprehensive news analysis with sentiment
 
-IMPORTANT: You must respond with valid JSON only, no other text or formatting.
+CRITICAL DETECTION RULES:
+- If the query contains text in quotes (single or double), extract that text for direct analysis
+- "Analyze sentiment: 'text here'" → extract 'text here' for direct sentiment analysis
+- If no quotes, user wants sentiment analysis of news on a topic
 
 Required JSON format:
 {{
   "intent": "fetch_news|sentiment_analysis|summarize|combined_analysis",
   "confidence": 0.95,
   "topic": "specific subject or null",
+  "text": "exact quoted text for direct analysis or null",
   "country": "US|UK|FR|DE|CA|AU|JP|CN|null",
   "language": "en|fr|es|de|etc",
   "limit": 5,
@@ -151,11 +156,11 @@ Required JSON format:
 }}
 
 Examples:
-Input: "Get latest tech news"
-Output: {{"intent": "fetch_news", "confidence": 0.9, "topic": "technology", "country": null, "language": "en", "limit": 5, "reasoning": "User explicitly requests news about technology", "follow_up_suggestions": ["What's the sentiment on tech news?", "Summarize today's tech developments", "Analyze AI news trends"]}}
+Input: "Analyze sentiment: 'This product is amazing but expensive'"
+Output: {{"intent": "sentiment_analysis", "confidence": 0.98, "topic": null, "text": "This product is amazing but expensive", "country": null, "language": "en", "limit": 5, "reasoning": "User provides specific text for direct sentiment analysis", "follow_up_suggestions": ["Get product reviews news", "Analyze market trends", "Summarize product feedback"]}}
 
 Input: "How do people feel about climate change?"
-Output: {{"intent": "sentiment_analysis", "confidence": 0.95, "topic": "climate change", "country": null, "language": "en", "limit": 5, "reasoning": "User asks about public sentiment on climate change", "follow_up_suggestions": ["Get latest climate news", "Summarize climate reports", "Analyze climate policy news"]}}
+Output: {{"intent": "sentiment_analysis", "confidence": 0.95, "topic": "climate change", "text": null, "country": null, "language": "en", "limit": 5, "reasoning": "User asks about public sentiment on climate change from news", "follow_up_suggestions": ["Get latest climate news", "Summarize climate reports", "Analyze climate policy news"]}}
 
 Current conversation context: {context}
 Chat history: {chat_history}
@@ -309,7 +314,7 @@ Keep it concise but informative.
             elif name == "analyze_sentiment":
                 self.mcp_tools["analyze_sentiment"] = Tool(
                     name="analyze_sentiment",
-                    description="Analyze sentiment of text using TextBlob and VADER",
+                    description="Analyze sentiment of text using Mistral LLM",
                     func=lambda **kwargs: call_mcp_tool("analyze_sentiment", **kwargs)
                 )
             elif name == "summarize_text":
@@ -473,10 +478,22 @@ Keep it concise but informative.
         """Fallback intent analysis when LLM is not available"""
         query_lower = query.lower()
         
+        # Check for specific text analysis (text in quotes)
+        import re
+        text_match = re.search(r'["\']([^"\']+)["\']', query)
+        
         # Simple rule-based classification
         if any(word in query_lower for word in ['feel', 'sentiment', 'opinion', 'think']):
             intent = 'sentiment_analysis'
             confidence = 0.7
+            # If there's quoted text, use it directly
+            if text_match:
+                return QueryIntent(
+                    intent=intent,
+                    confidence=confidence,
+                    text=text_match.group(1),  # Extract the quoted text
+                    reasoning="Detected quoted text for direct sentiment analysis"
+                )
         elif any(word in query_lower for word in ['summarize', 'summary', 'brief', 'tldr']):
             intent = 'summarize'
             confidence = 0.7
@@ -532,9 +549,17 @@ Keep it concise but informative.
                 result = await self._call_mcp_tool('fetch_news', params)
                 
             elif intent.intent == 'sentiment_analysis':
-                if 'text' in params:
+                if intent.text:
+                    # Direct text analysis (user provided text in quotes)
+                    sentiment_result = await self._call_mcp_tool('analyze_sentiment', {'text': intent.text})
+                    enhanced_sentiment = self._add_sentiment_summary(sentiment_result.get('result', 'Analysis failed'))
+                    result = {
+                        'success': sentiment_result.get('success', False),
+                        'result': enhanced_sentiment
+                    }
+                elif 'text' in params:
+                    # Fallback: text provided in params
                     sentiment_result = await self._call_mcp_tool('analyze_sentiment', {'text': params['text']})
-                    # Add enhanced summary using clean content
                     enhanced_sentiment = self._add_sentiment_summary(sentiment_result.get('result', 'Analysis failed'))
                     result = {
                         'success': sentiment_result.get('success', False),
