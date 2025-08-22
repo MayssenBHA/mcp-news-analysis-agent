@@ -1,26 +1,31 @@
 """
-Sentiment Analysis Tool - Analyzes sentiment of text or news articles
+Sentiment Analysis Tool - AI-powered sentiment analysis using Mistral LLM
 """
 
 from typing import Dict, Any, List
-from textblob import TextBlob
-from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
 import asyncio
+import json
+import os
+from mistralai import Mistral
 
 
 class SentimentTool:
-    """Tool for analyzing sentiment of text content"""
+    """Tool for analyzing sentiment of text content using Mistral LLM"""
     
     def __init__(self):
-        self.vader_analyzer = SentimentIntensityAnalyzer()
+        api_key = os.getenv('MISTRAL_API_KEY')
+        if not api_key:
+            raise ValueError("MISTRAL_API_KEY environment variable not set")
+        self.client = Mistral(api_key=api_key)
+        self.model = "mistral-tiny"
     
-    async def analyze_sentiment(self, text: str, method: str = "comprehensive") -> Dict[str, Any]:
+    async def analyze_sentiment(self, text: str, method: str = "llm") -> Dict[str, Any]:
         """
-        Analyze sentiment of given text
+        Analyze sentiment of given text using Mistral LLM
         
         Args:
             text: Text to analyze
-            method: Analysis method ('textblob', 'vader', 'comprehensive')
+            method: Analysis method ('llm', 'detailed', or 'simple')
             
         Returns:
             Dictionary containing sentiment analysis results
@@ -32,45 +37,116 @@ class SentimentTool:
             }
         
         try:
-            result = {'success': True, 'text_length': len(text)}
+            if method == "detailed":
+                sentiment_result = await self._analyze_detailed_sentiment(text)
+            else:
+                sentiment_result = await self._analyze_simple_sentiment(text)
             
-            if method in ['textblob', 'comprehensive']:
-                # TextBlob analysis
-                blob = TextBlob(text)
-                textblob_sentiment = {
-                    'polarity': round(blob.sentiment.polarity, 3),  # -1 to 1
-                    'subjectivity': round(blob.sentiment.subjectivity, 3),  # 0 to 1
-                    'classification': self._classify_textblob_sentiment(blob.sentiment.polarity)
-                }
-                result['textblob'] = textblob_sentiment
-            
-            if method in ['vader', 'comprehensive']:
-                # VADER analysis
-                vader_scores = self.vader_analyzer.polarity_scores(text)
-                vader_sentiment = {
-                    'compound': round(vader_scores['compound'], 3),
-                    'positive': round(vader_scores['pos'], 3),
-                    'neutral': round(vader_scores['neu'], 3),
-                    'negative': round(vader_scores['neg'], 3),
-                    'classification': self._classify_vader_sentiment(vader_scores['compound'])
-                }
-                result['vader'] = vader_sentiment
-            
-            # Add overall classification if comprehensive analysis
-            if method == 'comprehensive':
-                result['overall_sentiment'] = self._get_overall_sentiment(result)
-            
-            return result
+            return {
+                'success': True,
+                'text_length': len(text),
+                'sentiment': sentiment_result,
+                'analysis_method': 'mistral_llm'
+            }
             
         except Exception as e:
             return {
                 'success': False,
-                'error': f'Sentiment analysis failed: {str(e)}'
+                'error': f'LLM sentiment analysis failed: {str(e)}'
             }
+    
+    async def _analyze_simple_sentiment(self, text: str) -> Dict[str, Any]:
+        """Simple sentiment analysis using LLM"""
+        prompt = f"""Analyze the sentiment of the following text and respond with ONLY a JSON object:
+
+Text: "{text}"
+
+Respond with this exact format:
+{{
+    "sentiment": "positive|negative|neutral",
+    "confidence": 0.0-1.0,
+    "reasoning": "brief explanation"
+}}"""
+
+        messages = [
+            {"role": "user", "content": prompt}
+        ]
+        
+        response = self.client.chat.complete(
+            model=self.model,
+            messages=messages,
+            temperature=0.1
+        )
+        
+        try:
+            result = json.loads(response.choices[0].message.content.strip())
+            return {
+                'classification': result['sentiment'],
+                'confidence': float(result['confidence']),
+                'reasoning': result['reasoning']
+            }
+        except (json.JSONDecodeError, KeyError) as e:
+            # Fallback if JSON parsing fails
+            content = response.choices[0].message.content.lower()
+            if 'positive' in content:
+                classification = 'positive'
+            elif 'negative' in content:
+                classification = 'negative'
+            else:
+                classification = 'neutral'
+            
+            return {
+                'classification': classification,
+                'confidence': 0.7,
+                'reasoning': 'Fallback analysis due to parsing error',
+                'raw_response': response.choices[0].message.content
+            }
+    
+    async def _analyze_detailed_sentiment(self, text: str) -> Dict[str, Any]:
+        """Detailed sentiment analysis using LLM"""
+        prompt = f"""Perform a comprehensive sentiment analysis of the following text. Respond with ONLY a JSON object:
+
+Text: "{text}"
+
+Analyze the sentiment across multiple dimensions and respond with this exact format:
+{{
+    "overall_sentiment": "positive|negative|neutral|mixed",
+    "confidence": 0.0-1.0,
+    "emotional_tone": "happy|sad|angry|excited|calm|anxious|etc",
+    "subjectivity": "objective|subjective|highly_subjective",
+    "intensity": "low|medium|high",
+    "key_phrases": ["phrase1", "phrase2"],
+    "reasoning": "detailed explanation"
+}}"""
+
+        messages = [
+            {"role": "user", "content": prompt}
+        ]
+        
+        response = self.client.chat.complete(
+            model=self.model,
+            messages=messages,
+            temperature=0.1
+        )
+        
+        try:
+            result = json.loads(response.choices[0].message.content.strip())
+            return {
+                'classification': result['overall_sentiment'],
+                'confidence': float(result['confidence']),
+                'emotional_tone': result['emotional_tone'],
+                'subjectivity': result['subjectivity'],
+                'intensity': result['intensity'],
+                'key_phrases': result['key_phrases'],
+                'reasoning': result['reasoning']
+            }
+        except (json.JSONDecodeError, KeyError) as e:
+            # Fallback analysis
+            return await self._analyze_simple_sentiment(text)
     
     async def analyze_articles_sentiment(self, articles: List[Dict[str, Any]]) -> Dict[str, Any]:
         """
-        Analyze sentiment of multiple news articles
+        Analyze sentiment of multiple news articles using LLM
         
         Args:
             articles: List of article dictionaries
@@ -91,18 +167,18 @@ class SentimentTool:
                 # Combine title and description for analysis
                 text_to_analyze = f"{article.get('title', '')} {article.get('description', '')}"
                 
-                sentiment_result = await self.analyze_sentiment(text_to_analyze, method='comprehensive')
+                sentiment_result = await self.analyze_sentiment(text_to_analyze, method='llm')
                 
                 if sentiment_result['success']:
                     article_sentiment = {
                         'article_index': i,
                         'title': article.get('title', 'No title')[:100],
-                        'sentiment': sentiment_result
+                        'sentiment_analysis': sentiment_result['sentiment']
                     }
                     article_sentiments.append(article_sentiment)
             
-            # Calculate aggregate sentiment
-            aggregate_sentiment = self._calculate_aggregate_sentiment(article_sentiments)
+            # Calculate aggregate sentiment using LLM
+            aggregate_sentiment = await self._calculate_aggregate_sentiment(article_sentiments)
             
             return {
                 'success': True,
@@ -117,93 +193,81 @@ class SentimentTool:
                 'error': f'Batch sentiment analysis failed: {str(e)}'
             }
     
-    def _classify_textblob_sentiment(self, polarity: float) -> str:
-        """Classify TextBlob polarity score into sentiment category"""
-        if polarity > 0.1:
-            return 'positive'
-        elif polarity < -0.1:
-            return 'negative'
-        else:
-            return 'neutral'
     
-    def _classify_vader_sentiment(self, compound: float) -> str:
-        """Classify VADER compound score into sentiment category"""
-        if compound >= 0.05:
-            return 'positive'
-        elif compound <= -0.05:
-            return 'negative'
-        else:
-            return 'neutral'
-    
-    def _get_overall_sentiment(self, analysis_result: Dict[str, Any]) -> Dict[str, Any]:
-        """Calculate overall sentiment from TextBlob and VADER results"""
-        textblob_class = analysis_result.get('textblob', {}).get('classification', 'neutral')
-        vader_class = analysis_result.get('vader', {}).get('classification', 'neutral')
-        
-        # Simple majority vote
-        if textblob_class == vader_class:
-            classification = textblob_class
-            confidence = 'high'
-        elif (textblob_class == 'neutral' and vader_class != 'neutral') or \
-             (textblob_class != 'neutral' and vader_class == 'neutral'):
-            classification = textblob_class if textblob_class != 'neutral' else vader_class
-            confidence = 'medium'
-        else:
-            classification = 'mixed'
-            confidence = 'low'
-        
-        return {
-            'classification': classification,
-            'confidence': confidence,
-            'textblob_agrees': textblob_class,
-            'vader_agrees': vader_class
-        }
-    
-    def _calculate_aggregate_sentiment(self, article_sentiments: List[Dict[str, Any]]) -> Dict[str, Any]:
-        """Calculate aggregate sentiment across multiple articles"""
+    async def _calculate_aggregate_sentiment(self, article_sentiments: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """Calculate aggregate sentiment across multiple articles using LLM"""
         if not article_sentiments:
-            return {'classification': 'neutral', 'confidence': 'low'}
+            return {'classification': 'neutral', 'confidence': 0.5}
         
-        classifications = []
-        textblob_polarities = []
-        vader_compounds = []
+        # Prepare summary of individual sentiments for LLM analysis
+        sentiment_summary = []
+        for article in article_sentiments:
+            sentiment_data = article['sentiment_analysis']
+            sentiment_summary.append({
+                'title': article['title'],
+                'sentiment': sentiment_data['classification'],
+                'confidence': sentiment_data['confidence']
+            })
         
-        for article_sentiment in article_sentiments:
-            sentiment_data = article_sentiment['sentiment']
+        prompt = f"""Analyze the overall sentiment trend from these {len(sentiment_summary)} news articles. Respond with ONLY a JSON object:
+
+Articles sentiment data:
+{json.dumps(sentiment_summary, indent=2)}
+
+Provide an aggregate analysis with this exact format:
+{{
+    "overall_sentiment": "positive|negative|neutral|mixed",
+    "confidence": 0.0-1.0,
+    "sentiment_distribution": {{
+        "positive_count": 0,
+        "negative_count": 0,
+        "neutral_count": 0
+    }},
+    "dominant_sentiment": "most common sentiment",
+    "trend_analysis": "brief analysis of the overall trend"
+}}"""
+
+        messages = [
+            {"role": "user", "content": prompt}
+        ]
+        
+        try:
+            response = self.client.chat.complete(
+                model=self.model,
+                messages=messages,
+                temperature=0.1
+            )
             
-            if 'overall_sentiment' in sentiment_data:
-                classifications.append(sentiment_data['overall_sentiment']['classification'])
+            result = json.loads(response.choices[0].message.content.strip())
+            return {
+                'overall_sentiment': result['overall_sentiment'],
+                'confidence': float(result['confidence']),
+                'sentiment_distribution': result['sentiment_distribution'],
+                'dominant_sentiment': result['dominant_sentiment'],
+                'trend_analysis': result['trend_analysis']
+            }
             
-            if 'textblob' in sentiment_data:
-                textblob_polarities.append(sentiment_data['textblob']['polarity'])
+        except Exception as e:
+            # Fallback to simple counting
+            classifications = [article['sentiment_analysis']['classification'] for article in article_sentiments]
+            positive_count = classifications.count('positive')
+            negative_count = classifications.count('negative')
+            neutral_count = classifications.count('neutral')
             
-            if 'vader' in sentiment_data:
-                vader_compounds.append(sentiment_data['vader']['compound'])
-        
-        # Calculate averages
-        avg_textblob = sum(textblob_polarities) / len(textblob_polarities) if textblob_polarities else 0
-        avg_vader = sum(vader_compounds) / len(vader_compounds) if vader_compounds else 0
-        
-        # Count classifications
-        positive_count = classifications.count('positive')
-        negative_count = classifications.count('negative')
-        neutral_count = classifications.count('neutral')
-        mixed_count = classifications.count('mixed')
-        
-        total_articles = len(classifications)
-        
-        return {
-            'average_textblob_polarity': round(avg_textblob, 3),
-            'average_vader_compound': round(avg_vader, 3),
-            'sentiment_distribution': {
-                'positive': f"{positive_count}/{total_articles} ({positive_count/total_articles*100:.1f}%)",
-                'negative': f"{negative_count}/{total_articles} ({negative_count/total_articles*100:.1f}%)",
-                'neutral': f"{neutral_count}/{total_articles} ({neutral_count/total_articles*100:.1f}%)",
-                'mixed': f"{mixed_count}/{total_articles} ({mixed_count/total_articles*100:.1f}%)"
-            },
-            'dominant_sentiment': max(['positive', 'negative', 'neutral', 'mixed'], 
-                                   key=lambda x: classifications.count(x))
-        }
+            dominant = max(['positive', 'negative', 'neutral'], key=classifications.count)
+            
+            return {
+                'overall_sentiment': dominant,
+                'confidence': 0.7,
+                'sentiment_distribution': {
+                    'positive_count': positive_count,
+                    'negative_count': negative_count,
+                    'neutral_count': neutral_count
+                },
+                'dominant_sentiment': dominant,
+                'trend_analysis': f'Fallback analysis: {dominant} sentiment dominates',
+                'fallback_used': True
+            }
 
 
 # Tool registration functions for MCP server
@@ -211,7 +275,7 @@ async def get_sentiment_tool_definition():
     """Return the tool definition for MCP server registration"""
     return {
         "name": "analyze_sentiment",
-        "description": "Analyze sentiment of text content using TextBlob and VADER sentiment analysis",
+        "description": "Analyze sentiment of text content using advanced Mistral LLM",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -221,9 +285,9 @@ async def get_sentiment_tool_definition():
                 },
                 "method": {
                     "type": "string",
-                    "description": "Analysis method: 'textblob', 'vader', or 'comprehensive'",
-                    "enum": ["textblob", "vader", "comprehensive"],
-                    "default": "comprehensive"
+                    "description": "Analysis method: 'llm' (default), 'detailed' for comprehensive analysis",
+                    "enum": ["llm", "detailed"],
+                    "default": "llm"
                 }
             },
             "required": ["text"]
@@ -235,7 +299,7 @@ async def get_articles_sentiment_tool_definition():
     """Return the articles sentiment tool definition for MCP server registration"""
     return {
         "name": "analyze_articles_sentiment",
-        "description": "Analyze sentiment of multiple news articles and provide aggregate analysis",
+        "description": "Analyze sentiment of multiple news articles using Mistral LLM and provide aggregate analysis",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -262,7 +326,7 @@ async def execute_sentiment_tool(args: Dict[str, Any]) -> Dict[str, Any]:
     sentiment_tool = SentimentTool()
     return await sentiment_tool.analyze_sentiment(
         text=args.get('text', ''),
-        method=args.get('method', 'comprehensive')
+        method=args.get('method', 'llm')
     )
 
 
