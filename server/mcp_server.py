@@ -57,26 +57,28 @@ async def fetch_news(topic: str = None, country: str = "US", language: str = "en
         return f"❌ Error: {str(e)}"
 
 @app.tool()
-async def analyze_sentiment(text: str, method: str = "comprehensive") -> str:
-    """Analyze sentiment of text using TextBlob and VADER."""
+async def analyze_sentiment(text: str, method: str = "llm") -> str:
+    """Analyze sentiment of text using Mistral LLM."""
     try:
         sentiment_tool = SentimentTool()
         result = await sentiment_tool.analyze_sentiment(text, method)
         
         if result['success']:
-            response = "🧠 **Sentiment Analysis Results:**\n\n"
+            sentiment = result['sentiment']
+            response = "🧠 **LLM Sentiment Analysis Results:**\n\n"
             
-            if 'textblob' in result:
-                tb = result['textblob']
-                response += f"📊 **TextBlob:** {tb['classification']} (polarity: {tb['polarity']})\n"
+            response += f"🎭 **Classification:** {sentiment['classification'].title()}\n"
+            response += f"📊 **Confidence:** {sentiment['confidence']:.2f}\n"
+            response += f"� **Reasoning:** {sentiment['reasoning']}\n"
             
-            if 'vader' in result:
-                vader = result['vader']
-                response += f"📈 **VADER:** {vader['classification']} (compound: {vader['compound']})\n"
-            
-            if 'overall_sentiment' in result:
-                overall = result['overall_sentiment']
-                response += f"🎯 **Overall:** {overall['classification']} (confidence: {overall['confidence']})"
+            if 'emotional_tone' in sentiment:
+                response += f"😊 **Emotional Tone:** {sentiment['emotional_tone']}\n"
+            if 'subjectivity' in sentiment:
+                response += f"🎯 **Subjectivity:** {sentiment['subjectivity']}\n"
+            if 'intensity' in sentiment:
+                response += f"⚡ **Intensity:** {sentiment['intensity']}\n"
+            if 'key_phrases' in sentiment:
+                response += f"🔑 **Key Phrases:** {', '.join(sentiment['key_phrases'])}\n"
             
             return response
         else:
@@ -143,7 +145,7 @@ async def analyze_news_sentiment(topic: str = None, country: str = "US", languag
         # Analyze sentiment of combined text
         combined_text = " | ".join(article_texts)
         sentiment_tool = SentimentTool()
-        sentiment_result = await sentiment_tool.analyze_sentiment(combined_text, "comprehensive")
+        sentiment_result = await sentiment_tool.analyze_sentiment(combined_text, "llm")
         
         # Build comprehensive response
         response = f"🔍 **Comprehensive News Sentiment Analysis**\n\n"
@@ -155,30 +157,23 @@ async def analyze_news_sentiment(topic: str = None, country: str = "US", languag
         response += "📰 **Latest Articles:**\n\n"
         response += "\n\n---\n\n".join(formatted_articles)
         
-        # Add sentiment analysis
-        response += "\n\n🎭 **Sentiment Analysis Results:**\n\n"
+        # Add LLM sentiment analysis
+        response += "\n\n🎭 **LLM Sentiment Analysis Results:**\n\n"
         
         if sentiment_result.get('success'):
-            if 'textblob' in sentiment_result:
-                tb = sentiment_result['textblob']
-                response += f"📊 **TextBlob:** {tb['classification']} (polarity: {tb['polarity']:.3f})\n"
+            sentiment = sentiment_result['sentiment']
+            response += f"🎭 **Overall Classification:** {sentiment['classification'].title()}\n"
+            response += f"� **Confidence:** {sentiment['confidence']:.2f}\n"
+            response += f"💭 **AI Reasoning:** {sentiment['reasoning']}\n"
             
-            if 'vader' in sentiment_result:
-                vader = sentiment_result['vader']
-                response += f"📈 **VADER:** {vader['classification']} (compound: {vader['compound']:.3f})\n"
-            
-            if 'overall_sentiment' in sentiment_result:
-                overall = sentiment_result['overall_sentiment']
-                response += f"🎯 **Overall Sentiment:** {overall['classification']} (confidence: {overall['confidence']})\n"
-                
-                # Add interpretation
-                classification = overall['classification'].lower()
-                if 'positive' in classification:
-                    response += f"😊 **Interpretation:** News coverage appears generally optimistic or favorable about {topic or 'the topic'}."
-                elif 'negative' in classification:
-                    response += f"😔 **Interpretation:** News coverage appears generally critical or concerning about {topic or 'the topic'}."
-                else:
-                    response += f"😐 **Interpretation:** News coverage appears balanced or neutral about {topic or 'the topic'}."
+            # Add interpretation
+            classification = sentiment['classification'].lower()
+            if 'positive' in classification:
+                response += f"😊 **Interpretation:** News coverage appears generally optimistic or favorable about {topic or 'the topic'}."
+            elif 'negative' in classification:
+                response += f"😔 **Interpretation:** News coverage appears generally critical or concerning about {topic or 'the topic'}."
+            else:
+                response += f"😐 **Interpretation:** News coverage appears balanced or neutral about {topic or 'the topic'}."
         else:
             response += f"❌ Sentiment analysis failed: {sentiment_result.get('error', 'Unknown error')}"
         
