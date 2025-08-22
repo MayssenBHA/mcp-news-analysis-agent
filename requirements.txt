@@ -13,13 +13,8 @@ langchain-community>=0.3.27
 langchain-mistralai>=0.2.11
 langsmith>=0.4.15
 
-# Mistral AI API
+# Mistral AI API (for LLM-based sentiment analysis)
 mistralai>=1.9.0
-
-# Text Processing and Sentiment Analysis
-textblob>=0.19.0
-nltk>=3.9.0
-vaderSentiment>=3.3.2
 
 # HTTP and Async Support
 requests>=2.32.0
